@@ -23,6 +23,12 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/pnpm-lock.yaml ./pnpm-lock.yaml
 COPY . .
 
+# NEXT_PUBLIC_* must be present at build time (inlined into client JS).
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_USER_ID
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_USER_ID=${NEXT_PUBLIC_USER_ID}
+
 RUN cp next.config.dev.mjs next.config.mjs
 RUN cp .env.example .env
 RUN pnpm build
