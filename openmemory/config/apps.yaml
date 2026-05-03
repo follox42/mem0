@@ -1,0 +1,45 @@
+# Apps = memory zones per user (= projects / contexts).
+#
+# `shared_default: true` => readable by all agents of that user by default.
+#   Use this for cross-context info (identity, name, social profiles, stack).
+#
+# Agents are NOT pre-defined here. They are spawned at runtime via MCP URL.
+# At first request, OpenMemory creates the agent's app on-the-fly with
+# default ACL (read access to apps marked shared_default: true).
+
+apps:
+  nolann:
+    - name: personal
+      description: Vie perso, sante, secrets, famille
+
+    - name: nocode18
+      description: Entreprise NoCode18 (agence web locale)
+
+    - name: zephly
+      description: Plateforme Zephly (workflow IA)
+
+    - name: trading
+      description: Bot trading personnel (Hyperliquid + FTMO)
+
+    - name: freelance
+      description: Freelance Malt
+
+    - name: shared
+      description: Identite, infos communes (lue par tous les agents Nolann)
+      shared_default: true
+
+  jess:
+    - name: personal
+      description: Memoire perso de Jess
+
+  yoann:
+    - name: personal
+      description: Memoire perso de Yoann
+
+  matt:
+    - name: personal
+      description: Memoire perso de Matt
+
+  djamila:
+    - name: personal
+      description: Memoire perso de Djamila

@@ -1,0 +1,24 @@
+# Users (= isolation HARD per person).
+# user_id is the partition key. Memories with different user_id NEVER cross.
+# Add a new person here, restart the API container (or run scripts/seed.py).
+
+users:
+  - id: nolann
+    name: Nolann Flavien
+    description: Owner
+
+  - id: jess
+    name: Jess
+    description: Famille
+
+  - id: yoann
+    name: Yoann
+    description: Famille
+
+  - id: matt
+    name: Matt
+    description: Famille
+
+  - id: djamila
+    name: Djamila
+    description: Famille
