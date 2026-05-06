@@ -13,18 +13,26 @@ Key features:
 - Fallback to database-only mode when vector store is unavailable
 - Proper logging for debugging connection issues
 - Environment variable parsing for API keys
+
+Routing controls (MEM-4):
+- add_memories accepts an explicit `[app_name]` prefix in the text to route
+  the memory to a different app than the agent's default
+- move_memory(memory_id, target_app) re-categorizes a memory
+- promote_memory(memory_id) shortcut to move into 'shared'
+- tag_memory(memory_id, tags) adds metadata tags for cross-app filtering
 """
 
 import contextvars
 import datetime
 import json
 import logging
+import re
 import uuid
 
 import anyio
 
 from app.database import SessionLocal
-from app.models import Memory, MemoryAccessLog, MemoryState, MemoryStatusHistory
+from app.models import App, Memory, MemoryAccessLog, MemoryState, MemoryStatusHistory, User
 from app.utils.db import get_user_and_app
 from app.utils.memory import get_memory_client
 from app.utils.permissions import check_memory_access_permissions
@@ -61,7 +69,26 @@ mcp_router = APIRouter(prefix="/mcp")
 # Initialize SSE transport
 sse = SseServerTransport("/mcp/messages/")
 
-@mcp.tool(description="Add a new memory. This method is called everytime the user informs anything about themselves, their preferences, or anything that has any relevant information which can be useful in the future conversation. This can also be called when the user asks you to remember something. Set infer to False to store the memory verbatim without LLM fact extraction.")
+# Pattern: optional [app_name] prefix at the start of a memory text.
+# Allows the agent to route a single memory to a specific app, e.g.
+# "[shared] my Twitter is @follox42" -> stored in app `shared` instead of
+# the agent's default app.
+APP_PREFIX_PATTERN = re.compile(r'^\s*\[([a-z0-9_\-]+)\]\s*(.+)$', re.IGNORECASE | re.DOTALL)
+
+
+def parse_app_prefix(text: str, default_app: str) -> tuple[str, str]:
+    """Parse optional [app_name] prefix from a memory text.
+
+    Returns (target_app, cleaned_text). If no prefix is present,
+    returns (default_app, text) unchanged.
+    """
+    match = APP_PREFIX_PATTERN.match(text)
+    if match:
+        return match.group(1).lower(), match.group(2).strip()
+    return default_app, text
+
+
+@mcp.tool(description="Add a new memory. This method is called everytime the user informs anything about themselves, their preferences, or anything that has any relevant information which can be useful in the future conversation. This can also be called when the user asks you to remember something. Set infer to False to store the memory verbatim without LLM fact extraction. You can prefix the text with [app_name] to route the memory to a specific zone (e.g. '[shared] my Twitter is @follox42'). Without prefix, the memory is stored in the agent's default app.")
 async def add_memories(text: str, infer: bool = True) -> str:
     uid = user_id_var.get(None)
     client_name = client_name_var.get(None)
@@ -71,6 +98,9 @@ async def add_memories(text: str, infer: bool = True) -> str:
     if not client_name:
         return "Error: client_name not provided"
 
+    # Parse optional [app_name] prefix to route the memory to a specific app
+    target_app, text = parse_app_prefix(text, default_app=client_name)
+
     # Get memory client safely
     memory_client = get_memory_client_safe()
     if not memory_client:
@@ -79,8 +109,8 @@ async def add_memories(text: str, infer: bool = True) -> str:
     try:
         db = SessionLocal()
         try:
-            # Get or create user and app
-            user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            # Get or create user and target app (created on-the-fly if it doesn't exist)
+            user, app = get_user_and_app(db, user_id=uid, app_id=target_app)
 
             # Check if app is active
             if not app.is_active:
@@ -91,6 +121,8 @@ async def add_memories(text: str, infer: bool = True) -> str:
                                          metadata={
                                             "source_app": "openmemory",
                                             "mcp_client": client_name,
+                                            "app_id": target_app,
+                                            "routed_explicit": target_app != client_name,
                                          },
                                          infer=infer)
 
@@ -431,6 +463,132 @@ async def delete_all_memories() -> str:
         logging.exception(f"Error deleting memories: {e}")
         return f"Error deleting memories: {e}"
 
+
+# === MEM-4 routing tools ============================================================
+
+@mcp.tool(description="Move a memory to a different app (zone). Useful for re-categorizing memories. The target app is created on-the-fly if it doesn't exist. Cannot move across users.")
+async def move_memory(memory_id: str, target_app: str) -> str:
+    uid = user_id_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not target_app or not target_app.strip():
+        return "Error: target_app is required"
+
+    target_app = target_app.strip().lower()
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.user_id == uid).first()
+        if not user:
+            return f"Error: user '{uid}' not found"
+
+        try:
+            mem_uuid = uuid.UUID(memory_id)
+        except ValueError:
+            return f"Error: invalid memory_id '{memory_id}'"
+
+        memory = db.query(Memory).filter(Memory.id == mem_uuid).first()
+        if not memory:
+            return f"Error: memory '{memory_id}' not found"
+        if memory.user_id != user.id:
+            return f"Error: memory '{memory_id}' does not belong to user '{uid}' (cross-user move forbidden)"
+
+        # Get or create the target app
+        target_app_obj = db.query(App).filter(
+            App.owner_id == user.id, App.name == target_app
+        ).first()
+        if not target_app_obj:
+            target_app_obj = App(
+                id=uuid.uuid4(),
+                owner_id=user.id,
+                name=target_app,
+                is_active=True,
+                created_at=datetime.datetime.now(datetime.UTC),
+            )
+            db.add(target_app_obj)
+            db.flush()
+
+        old_app_id = memory.app_id
+        if old_app_id == target_app_obj.id:
+            return f"Memory already in app '{target_app}', no-op"
+
+        memory.app_id = target_app_obj.id
+
+        # Audit trail
+        access_log = MemoryAccessLog(
+            memory_id=mem_uuid,
+            app_id=target_app_obj.id,
+            access_type="move",
+            metadata_={
+                "from_app_id": str(old_app_id),
+                "to_app_name": target_app,
+                "actor": uid,
+            },
+        )
+        db.add(access_log)
+
+        db.commit()
+        return f"Memory '{memory_id}' moved to app '{target_app}' (user='{uid}')"
+    except Exception as e:
+        logging.exception(f"Error moving memory: {e}")
+        db.rollback()
+        return f"Error moving memory: {e}"
+    finally:
+        db.close()
+
+
+@mcp.tool(description="Promote a memory to the 'shared' app (shortcut for move_memory(id, 'shared')). Makes the memory readable by all agents of the user, assuming 'shared' has shared_default: true.")
+async def promote_memory(memory_id: str) -> str:
+    return await move_memory(memory_id, "shared")
+
+
+@mcp.tool(description="Add tags to a memory's metadata for cross-app filtering. Tags are merged (deduplicated, lowercased) with existing ones. Useful when a memory is relevant across multiple contexts (e.g. tags=['social', 'branding']).")
+async def tag_memory(memory_id: str, tags: list[str]) -> str:
+    uid = user_id_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not tags:
+        return "Error: tags list is empty"
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.user_id == uid).first()
+        if not user:
+            return f"Error: user '{uid}' not found"
+
+        try:
+            mem_uuid = uuid.UUID(memory_id)
+        except ValueError:
+            return f"Error: invalid memory_id '{memory_id}'"
+
+        memory = db.query(Memory).filter(Memory.id == mem_uuid).first()
+        if not memory:
+            return f"Error: memory '{memory_id}' not found"
+        if memory.user_id != user.id:
+            return f"Error: memory '{memory_id}' does not belong to user '{uid}'"
+
+        # Merge tags into metadata (dedup + lowercase + strip)
+        existing_meta = dict(memory.metadata_) if memory.metadata_ else {}
+        existing_tags = set(existing_meta.get("tags", []) or [])
+        for t in tags:
+            if t and isinstance(t, str):
+                cleaned = t.lower().strip()
+                if cleaned:
+                    existing_tags.add(cleaned)
+        existing_meta["tags"] = sorted(existing_tags)
+        memory.metadata_ = existing_meta
+
+        db.commit()
+        return f"Memory '{memory_id}' now has tags: {existing_meta['tags']}"
+    except Exception as e:
+        logging.exception(f"Error tagging memory: {e}")
+        db.rollback()
+        return f"Error tagging memory: {e}"
+    finally:
+        db.close()
+
+
+# === MCP transport handlers =========================================================
 
 @mcp_router.get("/{client_name}/sse/{user_id}")
 async def handle_sse(request: Request):
