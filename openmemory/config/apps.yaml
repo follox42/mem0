@@ -1,15 +1,14 @@
-# Apps = memory zones per user (= projects / contexts).
+# Apps = macro memory zones per user.
+#
+# Le decoupage fin (sub-domaines) ne vit PAS ici. Il vit dans :
+#   - `categories` (config/categories.yaml) : taxonomie semantique auto-classifiee
+#   - `metadata.tags` : tags transverses libres
+#   - graph (Neo4j) : entites + relations auto-extraites
+#
+# Les apps sont des frontieres STRUCTURELLES (ACL, isolation logique).
+# Voir TAXONOMY.md pour le modele 5-niveaux complet.
 #
 # `shared_default: true` => readable by all agents of that user by default.
-#   Use this for cross-context info (identity, social profiles, generic knowledge).
-#
-# Naming convention (life axis prefix):
-#   priv-*   = vie privee stricte (sante, finances perso, relations)
-#   pro-*    = business / clients / contrats
-#   tools-*  = systemes que tu construis ou operes
-#   learn-*  = connaissances apprises (transverse par nature)
-#   shared   = identite + infos communes
-#   inbox    = capture brute pas-encore-classifiee
 #
 # Agents are NOT pre-defined here. They are spawned at runtime via MCP URL.
 # At first request, OpenMemory creates the agent's app on-the-fly with
@@ -17,55 +16,25 @@
 
 apps:
   nolann:
-    # === AXE VIE PRIVEE ===
-    - name: priv-perso
-      description: Vie perso (sante, journal, secrets, prefs intimes)
+    - name: perso
+      description: Vie privee (sante, famille, finances perso, journal, decisions de vie). Niveau d'intimite eleve.
 
-    - name: priv-finance
-      description: Comptes perso, budget, investissements (hors trading bot)
+    - name: business
+      description: Toutes les entreprises et missions remunerees (NoCode18, Zephly, Freelance Malt, Upwork) + sales/marketing/copywriting transverse.
 
-    - name: priv-relations
-      description: Notes sur Jess, amis, famille (cote Nolann, pas leurs memoires a eux)
+    - name: tools
+      description: Infra technique que je construis ou opere (OpenFang, OpenClaw, OpenMemory, Social OS, MCPs, web stealth, trading bot, Coolify, Cloudflare). Mes systemes.
 
-    # === AXE PRO (entreprises + missions) ===
-    - name: pro-nocode18
-      description: Entreprise NoCode18 (agence web locale)
-
-    - name: pro-zephly
-      description: Plateforme Zephly (workflow IA SaaS)
-
-    - name: pro-freelance
-      description: Freelance Malt (TJM 650 EUR)
-
-    - name: pro-upwork
-      description: Plateforme Upwork (farm reviews dev web)
-
-    # === AXE OUTILS / SYSTEMES PERSO ===
-    - name: tools-trading
-      description: Bot trading (Hyperliquid + FTMO)
-
-    - name: tools-content
-      description: Social media + content engine (TikTok, IG, X, LI)
-
-    - name: tools-infra
-      description: Serveurs, Coolify, MCPs, OpenFang, OpenClaw
-
-    # === AXE APPRENTISSAGE (transverse par defaut) ===
-    - name: learn-tech
-      description: Cours, concepts code, patterns, tech stacks
+    - name: learn
+      description: Connaissances acquises (knowledge/ Obsidian, BTS CIEL, lectures code, OAuth deep-dive, kernel, theorie trading). Transverse par nature.
       shared_default: true
 
-    - name: learn-business
-      description: Sales, marketing, entrepreneuriat, psychologie vente
-      shared_default: true
-
-    # === AXE TRANSVERSE ===
     - name: shared
-      description: Identite, profils sociaux, prefs globales (lue par tous les agents Nolann)
+      description: Identite, profils sociaux, prefs globales, infos communes (lue par tous mes agents).
       shared_default: true
 
     - name: inbox
-      description: Capture brute pas-encore-classifiee. A trier periodiquement
+      description: Capture brute pas-encore-classifiee. A trier periodiquement (procedure proc-tri-inbox).
 
   jess:
     - name: personal

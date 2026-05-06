@@ -1,53 +1,39 @@
 # OpenMemory Multi-User Setup
 
+> Pour le modele complet d'organisation (5 niveaux : user / app / categories / tags / graph) -> voir [TAXONOMY.md](TAXONOMY.md).
+
 ## Architecture
 
 ```
 USERS (= persons, HARD isolation)
 +-- nolann (owner)
-|     |
-|     +-- AXE VIE PRIVEE
-|     |   +- priv-perso       (sante, journal, secrets)
-|     |   +- priv-finance     (comptes, budget, investissements)
-|     |   +- priv-relations   (Jess, amis, famille)
-|     |
-|     +-- AXE PRO
-|     |   +- pro-nocode18     (agence web)
-|     |   +- pro-zephly       (plateforme IA)
-|     |   +- pro-freelance    (Malt)
-|     |   +- pro-upwork       (Upwork)
-|     |
-|     +-- AXE OUTILS
-|     |   +- tools-trading    (bot Hyperliquid + FTMO)
-|     |   +- tools-content    (social media + content)
-|     |   +- tools-infra      (Coolify, MCPs, OpenFang)
-|     |
-|     +-- AXE APPRENTISSAGE (shared_default)
-|     |   +- learn-tech       (concepts code, patterns)
-|     |   +- learn-business   (sales, marketing)
-|     |
-|     +-- TRANSVERSE
-|         +- shared           (shared_default - identite, profils sociaux)
-|         +- inbox            (capture brute, a trier)
+|     +-- perso        (vie privee)
+|     +-- business     (entreprises + sales)
+|     +-- tools        (infra technique perso)
+|     +-- learn        (shared_default - transverse)
+|     +-- shared       (shared_default - identite)
+|     +-- inbox        (capture brute, a trier)
 |
-+-- jess           +- personal
-+-- yoann          +- personal
-+-- matt           +- personal
-+-- djamila        +- personal
++-- jess           +-- personal
++-- yoann          +-- personal
++-- matt           +-- personal
++-- djamila        +-- personal
 
 AGENTS = MCP clients, spawned at runtime (not pre-declared).
+CATEGORIES = 31 entries dans config/categories.yaml, auto-classifiees.
 ```
 
-## Naming convention (life axis prefix)
+## Modele 5-niveaux (resume)
 
-| Prefix | Contenu | Lecture par defaut |
-|---|---|---|
-| `priv-*`  | Vie privee stricte | uniquement assistant-perso (god-mode toi) |
-| `pro-*`   | Business / clients / contrats | l'agent du business + toi |
-| `tools-*` | Systemes que tu construis/operes | l'agent associe + toi |
-| `learn-*` | Connaissances apprises | TOUS tes agents (shared_default: true) |
-| `shared`  | Identite commune | tous tes agents (shared_default: true) |
-| `inbox`   | Pas encore classe | toi seulement |
+| # | Niveau | Cardinalite | Modifiable | Exemple |
+|---|---|---|---|---|
+| 1 | `user_id` | 5 (HARD) | non | nolann |
+| 2 | `app_id` | 6 (par user) | rare | business |
+| 3 | `categories` | 31 (taxonomie auto) | oui | nocode18, copywriting |
+| 4 | `tags` | libres | a la volee | client-laura, Q2-2026 |
+| 5 | graph | auto-extract | auto | (Person)-[FOUNDED]->(Company) |
+
+Details -> [TAXONOMY.md](TAXONOMY.md).
 
 ## MCP URL pattern
 
@@ -62,22 +48,21 @@ Examples:
 At the first request from a new `agent_id`, OpenMemory creates the
 corresponding `App` row on-the-fly. Same for `user_id`.
 
-## Memory routing
+## Memory routing (3 mecanismes)
 
-A memory's target zone (`app_id`) is determined by:
+1. **Prefixe explicite** dans `add_memories(text)` : `"[shared] my Twitter is @follox42"` -> route vers app `shared`
+2. **App par defaut de l'agent** (= homonyme du `client_name` MCP) si pas de prefixe
+3. **Promote/move post-hoc** via `promote_memory(id)` ou `move_memory(id, target_app)`
 
-1. **Explicit prefix in text** (planned MEM-4): `"[shared] my Twitter is @follox42"` -> routed to `shared`.
-2. **Agent's own app** (default): if no prefix, the agent writes to its own zone.
-3. **Promote/move later** (planned MEM-4): MCP tools `promote_memory(id)` / `move_memory(id, target)`.
+En parallele, le LLM auto-categorise (niveau 3) avec la taxonomie de `config/categories.yaml`.
 
-## Default ACL
+## Default ACL (`shared_default: true`)
 
-Apps with `shared_default: true` are readable by all agents of the same user. Currently:
-- `shared`         (identite, profils sociaux, prefs globales)
-- `learn-tech`     (les cours dev profitent a tout le monde)
-- `learn-business` (les concepts business profitent a tous les agents pro/freelance)
+Apps lisibles par TOUS les agents Nolann automatiquement :
+- `shared` (identite, profils sociaux, prefs globales)
+- `learn` (connaissances transverses)
 
-Tu peux toujours restreindre via REST API (`/api/v1/apps/{name}/acl`).
+Les autres apps -> acces explicite uniquement (via REST API ACL si besoin de granularite).
 
 ## Spawning a new agent
 
@@ -89,36 +74,37 @@ Tu peux toujours restreindre via REST API (`/api/v1/apps/{name}/acl`).
      "url": "https://mcp-memory.nocode18.com/mcp/ops-nocode18/http/nolann"
    }
    ```
-3. The first call creates the App with default ACL (access to `shared_default` apps).
-4. Optional: restrict scope via REST API (planned MEM-4).
+3. The first call creates the App with default ACL (access to `shared_default` apps + its own app).
+4. Optional: restrict scope via REST API.
 
-## Adding a user or app
+## Adding a user, app, or category
 
-1. Edit `config/users.yaml` or `config/apps.yaml`.
+1. Edit `config/users.yaml`, `config/apps.yaml`, or `config/categories.yaml`.
 2. Restart the API container OR run inside the container: `python scripts/seed.py`.
-3. The seed is **idempotent**: it only inserts what's missing.
+3. The seed is **idempotent** (apps/users), categories cache resets on restart.
 
 ## Stack
 
-| Service          | Image                    | Role                                              |
-|------------------|--------------------------|---------------------------------------------------|
-| postgres         | postgres:16-alpine       | metadata (users, apps, ACL, history)              |
-| qdrant           | qdrant/qdrant:v1.12.4    | vector store (semantic search)                    |
-| neo4j            | neo4j:5.24-community     | graph memory (entities + relations); UI on :7474  |
-| openmemory-mcp   | mem0/openmemory-mcp      | API + MCP server (port 8765)                      |
-| openmemory-ui    | local build              | Next.js dashboard (port 3000)                     |
+| Service | Image | Role |
+|---|---|---|
+| postgres | postgres:16-alpine | metadata (users, apps, ACL, history, categories) |
+| qdrant | qdrant/qdrant:v1.12.4 | vector store (semantic search) |
+| neo4j | neo4j:5.24-community | graph memory (entities + relations); UI on :7474 |
+| openmemory-mcp | mem0/openmemory-mcp | API + MCP server (port 8765) |
+| openmemory-ui | local build | Next.js dashboard (port 3000) |
 
 ## Graph memory (Neo4j)
 
-Enabled automatically when `NEO4J_URL` is set. The mem0 client builds an
-entity-relationship graph alongside vector search. Inspect via Neo4j Browser
-on `http://<host>:7474` (creds: `neo4j` / `${NEO4J_PASSWORD}`).
+Enabled automatically when `NEO4J_URL` is set. mem0 builds an entity-relation
+graph alongside the vector store. Inspect via Neo4j Browser on `:7474`
+(creds: `neo4j` / `${NEO4J_PASSWORD}`).
 
 ## Coolify deployment
 
 - App: `openmemory` (uuid `osqkvaex8ppdnmms3qh7hlgy`)
 - Repo: `follox42/mem0` branch `main` (PRs land via `dev`)
-- Traefik handles HTTPS + routing (no Caddy needed)
+- Traefik handles HTTPS + routing
+- FQDN: `mcp-memory.nocode18.com` (API), `memory.nocode18.com` (UI)
 - Tailscale-only ingress recommended for sensitive data
 
 ## Plane tracking
@@ -130,3 +116,5 @@ Project `MEM` (OpenMemory Stack):
 - MEM-4 Outils MCP routing (prefixe + promote/move/tag)
 - MEM-5 Notes KB Obsidian
 - MEM-6 Plugin Claude Code (hooks auto-memoire) - low priority
+- MEM-7 Re-categorization batch endpoint - planned
+- MEM-8 UI categories management - planned

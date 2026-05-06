@@ -1,0 +1,138 @@
+# Custom categories pour mem0 — taxonomie semantique de Nolann.
+#
+# A chaque insert/update d'une memory, le LLM (gpt-4o-mini) la classifie
+# automatiquement dans 1 a 5 de ces categories. Stockees dans la table
+# Postgres `categories` + `memory_categories`, et duppliquees dans
+# `metadata.categories` pour filtrage rapide.
+#
+# Source: synthese de 23 projets Plane + 36 projets KB Obsidian
+# + 17 sous-domaines knowledge/ + 5 areas + filesystem repos.
+# Voir TAXONOMY.md pour la justification de chaque categorie.
+#
+# Conventions:
+# - lowercase-tirets
+# - 1 a 2 mots
+# - description = quand l'utiliser, exemples concrets si possible
+# - 30 categories +/- 5 (taille optimale: ni trop peu, ni inflation)
+#
+# Pour modifier:
+# 1. Editer ce fichier
+# 2. Restart le container API (le cache se reset)
+# 3. Le LLM utilisera la nouvelle taxonomie pour les futures memories
+# 4. Pour reclassifier l'historique : POST /api/v1/memories/recategorize
+#    (a implementer en MEM-7 si besoin)
+
+categories:
+  # =====================================================
+  # AXE VIE PERSO (5)
+  # =====================================================
+  - name: sante
+    description: Sante physique, mentale, suivi medical (operation myopie), sport, alimentation, sommeil.
+
+  - name: famille
+    description: Notes sur Jess, Yoann, Matt, Djamila, parents, amis proches. Ce que je sais d'eux, leurs preferences, dates importantes.
+
+  - name: finance-perso
+    description: Comptes perso, budget, depenses, investissements personnels (hors trading bot qui est dans tools).
+
+  - name: journal
+    description: Reflexions personnelles, retros, decisions de vie, doutes, projets perso non-business.
+
+  - name: entertainment
+    description: Watchlist series/films, hobbies legers, jeux. Poker training comme loisir (le bot Stake va dans poker-stake).
+
+  # =====================================================
+  # AXE BUSINESS / ENTREPRISES (5)
+  # =====================================================
+  - name: nocode18
+    description: Agence web locale FR (commerces locaux + PME). Clients, prospection cold call/LinkedIn, sites Cloudflare Pages, recurrents (visibilite, ads, contenu, IA).
+
+  - name: zephly
+    description: SaaS produit IA workflow no-code. Roadmap, features, growth, blog SEO, pricing tiers Starter/Pro, Stripe billing, competitors.
+
+  - name: freelance
+    description: Missions Malt (TJM 650 EUR). Contrats, devis, livraisons, missions types.
+
+  - name: upwork
+    description: Plateforme Upwork. Bids strategy, jobs, 10 missions types (farm reviews dev web).
+
+  - name: poker-stake
+    description: Bot automation Stake.com (separe legalement du poker training, ToS grey area). PokerStake project.
+
+  # =====================================================
+  # AXE SALES / GROWTH / MARKETING (5)
+  # =====================================================
+  - name: prospection
+    description: Cold call, LinkedIn DM, Sales Navigator, scripts de prospection, sequences. Transverse NoCode18 + Zephly + Freelance.
+
+  - name: copywriting
+    description: Frameworks de persuasion (Cialdini, SPIN, Chris Voss, Hormozi, Challenger Sale). Scripts de vente, emails, hooks.
+
+  - name: marketing
+    description: Marketing strategique, positioning, channels, growth experiments, brand strategy.
+
+  - name: content
+    description: TikTok/IG/X/LinkedIn posts, brand voice, viral patterns, content pipeline (style DNA, agents creator/analyst/manager).
+
+  - name: seo-aeo
+    description: SEO on-page, schema markup, backlinks, perf Next.js, Lighthouse, AEO (Answer Engine Optimization), Google algo 2026.
+
+  # =====================================================
+  # AXE OUTILS TECHNIQUES (7)
+  # =====================================================
+  - name: openfang
+    description: Agent OS Rust autonomous runtime (14 crates, OAuth, dashboard, swarm, MCP server). Initiative OpenFang V1.
+
+  - name: openclaw
+    description: AI assistant deployment (fork follox42/openclaw, companion OpenFang). Coolify dev+prod.
+
+  - name: openmemory
+    description: Stack mem0 + Qdrant + Neo4j + Postgres + UI Next.js (le projet courant). Multi-user, taxonomie, ACL, routing.
+
+  - name: social-os
+    description: Postiz fork + providers Patchright vers Stealth Browser MCPs + agents par marque + UGC engine + stats reverse.
+
+  - name: mcps
+    description: Tous les MCP servers (LinkedIn, Twitter, Instagram, TikTok, Reddit, Stalwart-admin, Plane, Cloudflare, video-Gemini, etc.). Architecture unifiee.
+
+  - name: web-stealth
+    description: CloakBrowser (Camoufox + Patchright), anti-detection, browser fingerprinting, Cloudflare bypass, NUXT extraction.
+
+  - name: infra-devops
+    description: Coolify deployments, Cloudflare tunnels/DNS, Stalwart mail server, Traefik, backups, monitoring, GitHub CI/CD, mesh WireGuard.
+
+  # =====================================================
+  # AXE TRADING (2)
+  # =====================================================
+  - name: trading-quant
+    description: Bot trading crypto Binance + FTMO forex, Optuna backtesting, edges, anti-overfit toolkit, live execution Hyperliquid.
+
+  - name: trading-knowledge
+    description: Theorie trading (chandeliers japonais, support/resistance, trading bible, journal manuel hebdo, weekly reports W10-W17).
+
+  # =====================================================
+  # AXE APPRENTISSAGE (4)
+  # =====================================================
+  - name: learn-tech
+    description: Concepts code, langages (C, Rust, TypeScript), paradigmes, patterns, lectures de code (OpenFang, libs).
+
+  - name: learn-systems
+    description: Linux bas-niveau, eBPF, kernel, GPU/Mesa, systemd, video pipelines (GStreamer, Davinci Resolve).
+
+  - name: learn-security
+    description: OAuth 2.0/2.1, OIDC, JWT, SAML, SSO, MFA, RBAC, IAM, Diffie-Hellman, X.509, OpenSSL, security patterns.
+
+  - name: bts-ciel
+    description: Cursus formation BTS CIEL (cours, evaluations, blocs 1/2/3, maths, anglais, CGE, oraux).
+
+  # =====================================================
+  # AXE META / SYSTEM (3)
+  # =====================================================
+  - name: kb-system
+    description: Obsidian KB (rules, bootstrap, evolution-engine), Plane workflows (1h estimation, blockers, time tracking), OKR Q2 2026, smart linking, GTD, conventions de travail.
+
+  - name: legal-fr
+    description: Conditions Generales de Vente (CGV), mentions legales, RGPD, contrats FR, fiscalite (micro-entrepreneur, SAS), structure juridique.
+
+  - name: decision-retro
+    description: Decisions importantes (que ce soit perso ou pro), retros (post-mortem), lecons apprises, choix d'architecture/stack/strategie justifies. Transverse.
