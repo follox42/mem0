@@ -25,6 +25,11 @@ Example configuration that will be automatically adjusted:
         }
     }
 }
+
+Graph store (Neo4j):
+If NEO4J_URL is set in the environment, mem0 graph_store is auto-enabled.
+This activates entity + relation extraction alongside the vector store.
+Inspect via Neo4j Browser on :7474.
 """
 
 import hashlib
@@ -224,6 +229,44 @@ def _create_embedder_config(provider, model, api_key, base_url, ollama_base_url,
     return config
 
 
+# --- Graph store config factory (Neo4j) ---
+
+def _create_graph_store_config():
+    """
+    Build graph_store config for mem0 if Neo4j env vars are present.
+
+    Returns dict like:
+      {
+        "provider": "neo4j",
+        "config": {
+            "url": "bolt://neo4j:7687",
+            "username": "neo4j",
+            "password": "...",
+        }
+      }
+
+    Or None if NEO4J_URL is not set (graph memory disabled).
+    """
+    neo4j_url = os.environ.get('NEO4J_URL')
+    if not neo4j_url:
+        return None
+
+    neo4j_user = os.environ.get('NEO4J_USER', 'neo4j')
+    neo4j_password = os.environ.get('NEO4J_PASSWORD')
+    if not neo4j_password:
+        print("Warning: NEO4J_URL is set but NEO4J_PASSWORD is missing. Graph store disabled.")
+        return None
+
+    return {
+        "provider": "neo4j",
+        "config": {
+            "url": neo4j_url,
+            "username": neo4j_user,
+            "password": neo4j_password,
+        },
+    }
+
+
 def get_default_memory_config():
     """Get default memory client configuration with sensible defaults."""
     # Detect vector store based on environment variables
@@ -359,7 +402,7 @@ def get_default_memory_config():
     )
     print(f"Auto-detected embedder provider: {embedder_provider}")
 
-    return {
+    config = {
         "vector_store": {
             "provider": vector_store_provider,
             "config": vector_store_config
@@ -374,6 +417,14 @@ def get_default_memory_config():
         },
         "version": "v1.1"
     }
+
+    # Conditionally enable graph_store (Neo4j) if env vars are present
+    graph_store = _create_graph_store_config()
+    if graph_store:
+        config["graph_store"] = graph_store
+        print(f"Graph store enabled: provider={graph_store['provider']}, url={graph_store['config']['url']}")
+
+    return config
 
 
 def _parse_environment_variables(config_dict):
@@ -449,6 +500,13 @@ def get_memory_client(custom_instructions: str = None):
 
                     if "vector_store" in mem0_config and mem0_config["vector_store"] is not None:
                         config["vector_store"] = mem0_config["vector_store"]
+
+                    # Update graph_store from DB if explicitly set (None to disable, dict to override)
+                    if "graph_store" in mem0_config:
+                        if mem0_config["graph_store"] is None:
+                            config.pop("graph_store", None)
+                        else:
+                            config["graph_store"] = mem0_config["graph_store"]
             else:
                 print("No configuration found in database, using defaults")
                     
