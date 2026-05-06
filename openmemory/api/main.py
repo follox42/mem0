@@ -23,14 +23,19 @@ app.add_middleware(
 # Create all tables
 Base.metadata.create_all(bind=engine)
 
-# Check for USER_ID and create default user if needed
+
 def create_default_user():
+    """Legacy single-user bootstrap.
+
+    No-op in multi-user mode (USER_ID is None). Users are then created on-the-fly
+    from the MCP path /mcp/{client_name}/http/{user_id}, or via scripts/seed.py.
+    """
+    if not USER_ID:
+        return
     db = SessionLocal()
     try:
-        # Check if user exists
         user = db.query(User).filter(User.user_id == USER_ID).first()
         if not user:
-            # Create default user
             user = User(
                 id=uuid4(),
                 user_id=USER_ID,
@@ -44,13 +49,15 @@ def create_default_user():
 
 
 def create_default_app():
+    """Legacy single-user bootstrap. No-op in multi-user mode."""
+    if not USER_ID:
+        return
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.user_id == USER_ID).first()
         if not user:
             return
 
-        # Check if app already exists
         existing_app = db.query(App).filter(
             App.name == DEFAULT_APP_ID,
             App.owner_id == user.id
@@ -59,19 +66,20 @@ def create_default_app():
         if existing_app:
             return
 
-        app = App(
+        app_row = App(
             id=uuid4(),
             name=DEFAULT_APP_ID,
             owner_id=user.id,
             created_at=datetime.datetime.now(datetime.UTC),
             updated_at=datetime.datetime.now(datetime.UTC),
         )
-        db.add(app)
+        db.add(app_row)
         db.commit()
     finally:
         db.close()
 
-# Create default user on startup
+
+# Bootstrap (no-op in multi-user mode)
 create_default_user()
 create_default_app()
 

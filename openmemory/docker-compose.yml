@@ -1,27 +1,100 @@
+# OpenMemory Multi-User Stack
+# - postgres : metadata (users, apps, ACL, history)
+# - qdrant   : vector store (semantic search)
+# - neo4j    : graph memory (entities + relations) + browser UI :7474
+# - openmemory-mcp : API + MCP server (port 8765)
+# - openmemory-ui  : Next.js dashboard (port 3000)
+#
+# Multi-user : USER env var vide => users crees a la volee depuis le path MCP.
+# Seed : scripts/seed.py s'execute au boot et lit config/*.yaml (idempotent).
+
 services:
-  mem0_store:
-    image: qdrant/qdrant
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: openmemory
+      POSTGRES_USER: openmemory
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openmemory -d openmemory"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
     expose:
       - "6333"
     volumes:
-      - mem0_storage:/qdrant/storage
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:6333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5.24-community
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-changeme}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+    expose:
+      - "7474"
+      - "7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
     restart: unless-stopped
 
   openmemory-mcp:
     image: mem0/openmemory-mcp
     build: api/
     environment:
-      - USER
-      - API_KEY
-      - OPENAI_API_KEY
+      - DATABASE_URL=postgresql://openmemory:${POSTGRES_PASSWORD:-changeme}@postgres:5432/openmemory
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - NEO4J_URL=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-changeme}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SEED_ON_BOOT=${SEED_ON_BOOT:-true}
+      - USER=${USER:-}
+      - API_KEY=${API_KEY:-}
     env_file:
       - api/.env
     depends_on:
-      - mem0_store
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
     expose:
       - "8765"
+    volumes:
+      - ./config:/usr/src/openmemory/config:ro
+      - ./scripts:/usr/src/openmemory/scripts:ro
     command: >
-      sh -c "uvicorn main:app --host 0.0.0.0 --port 8765 --workers 4"
+      sh -c "
+        if [ \"$$SEED_ON_BOOT\" = \"true\" ]; then
+          python /usr/src/openmemory/scripts/seed.py || echo '[seed] failed but continuing';
+        fi &&
+        uvicorn main:app --host 0.0.0.0 --port 8765 --workers 4
+      "
     restart: unless-stopped
 
   openmemory-ui:
@@ -30,15 +103,18 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-        NEXT_PUBLIC_USER_ID: ${USER}
+        NEXT_PUBLIC_USER_ID: ${USER:-nolann}
     expose:
       - "3000"
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-      - NEXT_PUBLIC_USER_ID=${USER}
+      - NEXT_PUBLIC_USER_ID=${USER:-nolann}
     depends_on:
       - openmemory-mcp
     restart: unless-stopped
 
 volumes:
-  mem0_storage:
+  postgres_data:
+  qdrant_data:
+  neo4j_data:
+  neo4j_logs:
