@@ -4,20 +4,50 @@
 
 ```
 USERS (= persons, HARD isolation)
-+- nolann (owner) +- personal
-|                 +- nocode18
-|                 +- zephly
-|                 +- trading
-|                 +- freelance
-|                 +- shared       <-- readable by all Nolann agents (shared_default)
++-- nolann (owner)
+|     |
+|     +-- AXE VIE PRIVEE
+|     |   +- priv-perso       (sante, journal, secrets)
+|     |   +- priv-finance     (comptes, budget, investissements)
+|     |   +- priv-relations   (Jess, amis, famille)
+|     |
+|     +-- AXE PRO
+|     |   +- pro-nocode18     (agence web)
+|     |   +- pro-zephly       (plateforme IA)
+|     |   +- pro-freelance    (Malt)
+|     |   +- pro-upwork       (Upwork)
+|     |
+|     +-- AXE OUTILS
+|     |   +- tools-trading    (bot Hyperliquid + FTMO)
+|     |   +- tools-content    (social media + content)
+|     |   +- tools-infra      (Coolify, MCPs, OpenFang)
+|     |
+|     +-- AXE APPRENTISSAGE (shared_default)
+|     |   +- learn-tech       (concepts code, patterns)
+|     |   +- learn-business   (sales, marketing)
+|     |
+|     +-- TRANSVERSE
+|         +- shared           (shared_default - identite, profils sociaux)
+|         +- inbox            (capture brute, a trier)
 |
-+- jess           +- personal
-+- yoann          +- personal
-+- matt           +- personal
-+- djamila        +- personal
++-- jess           +- personal
++-- yoann          +- personal
++-- matt           +- personal
++-- djamila        +- personal
 
 AGENTS = MCP clients, spawned at runtime (not pre-declared).
 ```
+
+## Naming convention (life axis prefix)
+
+| Prefix | Contenu | Lecture par defaut |
+|---|---|---|
+| `priv-*`  | Vie privee stricte | uniquement assistant-perso (god-mode toi) |
+| `pro-*`   | Business / clients / contrats | l'agent du business + toi |
+| `tools-*` | Systemes que tu construis/operes | l'agent associe + toi |
+| `learn-*` | Connaissances apprises | TOUS tes agents (shared_default: true) |
+| `shared`  | Identite commune | tous tes agents (shared_default: true) |
+| `inbox`   | Pas encore classe | toi seulement |
 
 ## MCP URL pattern
 
@@ -26,8 +56,8 @@ http://<host>:8765/mcp/{agent_id}/http/{user_id}
 ```
 
 Examples:
-- `http://localhost:8765/mcp/dev-zephly/http/nolann`
-- `http://localhost:8765/mcp/jess-assistant/http/jess`
+- `https://mcp-memory.nocode18.com/mcp/dev-zephly/http/nolann`
+- `https://mcp-memory.nocode18.com/mcp/jess-assistant/http/jess`
 
 At the first request from a new `agent_id`, OpenMemory creates the
 corresponding `App` row on-the-fly. Same for `user_id`.
@@ -36,17 +66,18 @@ corresponding `App` row on-the-fly. Same for `user_id`.
 
 A memory's target zone (`app_id`) is determined by:
 
-1. **Explicit prefix in text** (planned): `"[shared] my Twitter is @follox42"` -> routed to `shared`.
+1. **Explicit prefix in text** (planned MEM-4): `"[shared] my Twitter is @follox42"` -> routed to `shared`.
 2. **Agent's own app** (default): if no prefix, the agent writes to its own zone.
-3. **Promote/move later** (planned): MCP tools `promote_memory(id)` / `move_memory(id, target)`.
-
-> Items 1 and 3 are tracked in MEM-4 ("Outils MCP routing").
+3. **Promote/move later** (planned MEM-4): MCP tools `promote_memory(id)` / `move_memory(id, target)`.
 
 ## Default ACL
 
-Apps with `shared_default: true` (e.g. `shared`) are readable by all agents of
-the same user. Put your identity, social profiles, stack, generic preferences
-there. Every agent of yours will see them naturally.
+Apps with `shared_default: true` are readable by all agents of the same user. Currently:
+- `shared`         (identite, profils sociaux, prefs globales)
+- `learn-tech`     (les cours dev profitent a tout le monde)
+- `learn-business` (les concepts business profitent a tous les agents pro/freelance)
+
+Tu peux toujours restreindre via REST API (`/api/v1/apps/{name}/acl`).
 
 ## Spawning a new agent
 
@@ -55,7 +86,7 @@ there. Every agent of yours will see them naturally.
    ```json
    "ops-nocode18": {
      "type": "http",
-     "url": "http://openmemory:8765/mcp/ops-nocode18/http/nolann"
+     "url": "https://mcp-memory.nocode18.com/mcp/ops-nocode18/http/nolann"
    }
    ```
 3. The first call creates the App with default ACL (access to `shared_default` apps).
@@ -98,3 +129,4 @@ Project `MEM` (OpenMemory Stack):
 - MEM-3 Seed users + apps + ACL
 - MEM-4 Outils MCP routing (prefixe + promote/move/tag)
 - MEM-5 Notes KB Obsidian
+- MEM-6 Plugin Claude Code (hooks auto-memoire) - low priority
