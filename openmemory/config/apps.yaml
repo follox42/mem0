@@ -1,7 +1,15 @@
 # Apps = memory zones per user (= projects / contexts).
 #
 # `shared_default: true` => readable by all agents of that user by default.
-#   Use this for cross-context info (identity, name, social profiles, stack).
+#   Use this for cross-context info (identity, social profiles, generic knowledge).
+#
+# Naming convention (life axis prefix):
+#   priv-*   = vie privee stricte (sante, finances perso, relations)
+#   pro-*    = business / clients / contrats
+#   tools-*  = systemes que tu construis ou operes
+#   learn-*  = connaissances apprises (transverse par nature)
+#   shared   = identite + infos communes
+#   inbox    = capture brute pas-encore-classifiee
 #
 # Agents are NOT pre-defined here. They are spawned at runtime via MCP URL.
 # At first request, OpenMemory creates the agent's app on-the-fly with
@@ -9,24 +17,55 @@
 
 apps:
   nolann:
-    - name: personal
-      description: Vie perso, sante, secrets, famille
+    # === AXE VIE PRIVEE ===
+    - name: priv-perso
+      description: Vie perso (sante, journal, secrets, prefs intimes)
 
-    - name: nocode18
+    - name: priv-finance
+      description: Comptes perso, budget, investissements (hors trading bot)
+
+    - name: priv-relations
+      description: Notes sur Jess, amis, famille (cote Nolann, pas leurs memoires a eux)
+
+    # === AXE PRO (entreprises + missions) ===
+    - name: pro-nocode18
       description: Entreprise NoCode18 (agence web locale)
 
-    - name: zephly
-      description: Plateforme Zephly (workflow IA)
+    - name: pro-zephly
+      description: Plateforme Zephly (workflow IA SaaS)
 
-    - name: trading
-      description: Bot trading personnel (Hyperliquid + FTMO)
+    - name: pro-freelance
+      description: Freelance Malt (TJM 650 EUR)
 
-    - name: freelance
-      description: Freelance Malt
+    - name: pro-upwork
+      description: Plateforme Upwork (farm reviews dev web)
 
-    - name: shared
-      description: Identite, infos communes (lue par tous les agents Nolann)
+    # === AXE OUTILS / SYSTEMES PERSO ===
+    - name: tools-trading
+      description: Bot trading (Hyperliquid + FTMO)
+
+    - name: tools-content
+      description: Social media + content engine (TikTok, IG, X, LI)
+
+    - name: tools-infra
+      description: Serveurs, Coolify, MCPs, OpenFang, OpenClaw
+
+    # === AXE APPRENTISSAGE (transverse par defaut) ===
+    - name: learn-tech
+      description: Cours, concepts code, patterns, tech stacks
       shared_default: true
+
+    - name: learn-business
+      description: Sales, marketing, entrepreneuriat, psychologie vente
+      shared_default: true
+
+    # === AXE TRANSVERSE ===
+    - name: shared
+      description: Identite, profils sociaux, prefs globales (lue par tous les agents Nolann)
+      shared_default: true
+
+    - name: inbox
+      description: Capture brute pas-encore-classifiee. A trier periodiquement
 
   jess:
     - name: personal
