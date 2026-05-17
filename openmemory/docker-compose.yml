@@ -50,7 +50,7 @@ services:
       # The Neo4j entrypoint converts NEO4J_<x> env vars into config settings
       # `<x>` and rejects unknown ones. So we MUST NOT use `NEO4J_PASSWORD`
       # inside this container. Use a non-prefixed var for the healthcheck.
-      HC_NEO4J_PASSWORD: ${NEO4J_PASSWORD:-changeme}
+      HC_NEO4J_PASSWORD: ${OPENMEMORY_NEO4J_PASSWORD:-changeme}
     expose:
       - "7474"
       - "7687"
@@ -75,7 +75,7 @@ services:
       - QDRANT_PORT=6333
       - NEO4J_URL=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-changeme}
+      - NEO4J_PASSWORD=${OPENMEMORY_NEO4J_PASSWORD:-changeme}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - SEED_ON_BOOT=${SEED_ON_BOOT:-true}
       - USER=${USER:-}
