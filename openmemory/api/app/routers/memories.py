@@ -22,7 +22,7 @@ from fastapi_pagination import Page, Params
 from fastapi_pagination.ext.sqlalchemy import paginate as sqlalchemy_paginate
 from pydantic import BaseModel
 from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 router = APIRouter(prefix="/api/v1/memories", tags=["memories"])
 
@@ -143,14 +143,13 @@ async def list_memories(
         to_datetime = datetime.fromtimestamp(to_date, tz=UTC)
         query = query.filter(Memory.created_at <= to_datetime)
 
-    # Add joins for app and categories after filtering
+    # App join still needed (sort_column app_name uses it)
     query = query.outerjoin(App, Memory.app_id == App.id)
-    query = query.outerjoin(Memory.categories)
 
-    # Apply category filter if provided
+    # Category filter via EXISTS — no row multiplication so no DISTINCT needed
     if categories:
         category_list = [c.strip() for c in categories.split(",")]
-        query = query.filter(Category.name.in_(category_list))
+        query = query.filter(Memory.categories.any(Category.name.in_(category_list)))
 
     # Apply sorting if specified
     if sort_column:
@@ -158,11 +157,12 @@ async def list_memories(
         if sort_field:
             query = query.order_by(sort_field.desc()) if sort_direction == "desc" else query.order_by(sort_field.asc())
 
-    # Add eager loading for app and categories
+    # joinedload(Memory.app) is fine (1:1, no multiplication).
+    # selectinload(Memory.categories) issues a 2nd query — no JOIN, no dedup needed.
     query = query.options(
         joinedload(Memory.app),
-        joinedload(Memory.categories)
-    ).distinct()
+        selectinload(Memory.categories),
+    )
 
     # Get paginated results with transformer
     return sqlalchemy_paginate(
@@ -569,14 +569,12 @@ async def filter_memories(
     if request.app_ids:
         query = query.filter(Memory.app_id.in_(request.app_ids))
 
-    # Add joins for app and categories
+    # App join still needed for sort_column "app_name"
     query = query.outerjoin(App, Memory.app_id == App.id)
 
-    # Apply category filter
+    # Category filter via EXISTS — no row multiplication
     if request.category_ids:
-        query = query.join(Memory.categories).filter(Category.id.in_(request.category_ids))
-    else:
-        query = query.outerjoin(Memory.categories)
+        query = query.filter(Memory.categories.any(Category.id.in_(request.category_ids)))
 
     # Apply date filters
     if request.from_date:
@@ -611,10 +609,10 @@ async def filter_memories(
         # Default sorting
         query = query.order_by(Memory.created_at.desc())
 
-    # Add eager loading for categories and make the query distinct
+    # selectinload categories via 2nd query — no JOIN, no need for DISTINCT
     query = query.options(
-        joinedload(Memory.categories)
-    ).distinct()
+        selectinload(Memory.categories),
+    )
 
     # Use fastapi-pagination's paginate function
     return sqlalchemy_paginate(
@@ -657,20 +655,21 @@ async def get_related_memories(
     if not category_ids:
         return Page.create([], total=0, params=params)
     
-    # Build query for related memories
-    query = db.query(Memory).distinct().filter(
+    # Build query for related memories — count shared categories via JOIN+GROUP BY,
+    # then load categories with selectinload (no row multiplication, no DISTINCT).
+    query = db.query(Memory).filter(
         Memory.user_id == user.id,
         Memory.id != memory_id,
-        Memory.state != MemoryState.deleted
+        Memory.state != MemoryState.deleted,
     ).join(Memory.categories).filter(
-        Category.id.in_(category_ids)
-    ).options(
-        joinedload(Memory.categories),
-        joinedload(Memory.app)
+        Category.id.in_(category_ids),
+    ).group_by(Memory.id).options(
+        joinedload(Memory.app),
+        selectinload(Memory.categories),
     ).order_by(
         func.count(Category.id).desc(),
-        Memory.created_at.desc()
-    ).group_by(Memory.id)
+        Memory.created_at.desc(),
+    )
     
     # ⚡ Force page size to be 5
     params = Params(page=params.page, size=5)
