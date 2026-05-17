@@ -10,15 +10,40 @@ from app.routers import (apps_router, backup_router, config_router,
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_pagination import add_pagination
-from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 app = FastAPI(title="OpenMemory API")
 
-# Trust X-Forwarded-Proto from Traefik (Coolify reverse proxy) so that
-# redirect_slashes 307 responses use https:// in the Location header instead
-# of the internal http:// scheme uvicorn sees. Without this, the browser
-# refuses to follow the redirect (Mixed Content) and the UI breaks.
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
+# Rewrite http:// → https:// in Location headers for ALL responses.
+# Reason: Starlette's redirect_slashes (and other RedirectResponse callers)
+# generate Location URLs from scope['scheme'], which is "http" when uvicorn
+# is behind Traefik. ProxyHeadersMiddleware (the recommended fix) didn't
+# take effect here — middleware ordering inside FastAPI puts it AFTER
+# router decision, so the redirect is built before scheme is rewritten.
+# This pure-ASGI middleware sits at the outermost layer and rewrites the
+# Location bytes in flight. Bulletproof.
+class ForceHTTPSLocationMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return await self.app(scope, receive, send)
+
+        async def _send(message):
+            if message.get("type") == "http.response.start":
+                new_headers = []
+                for name, value in message.get("headers", []):
+                    if name.lower() == b"location" and value.startswith(b"http://"):
+                        value = b"https://" + value[len(b"http://"):]
+                    new_headers.append((name, value))
+                message["headers"] = new_headers
+            await send(message)
+
+        await self.app(scope, receive, _send)
+
+
+app.add_middleware(ForceHTTPSLocationMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
