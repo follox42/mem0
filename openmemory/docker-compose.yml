@@ -68,7 +68,9 @@ services:
 
   openmemory-mcp:
     image: mem0/openmemory-mcp
-    build: api/
+    build:
+      context: .
+      dockerfile: api/Dockerfile
     environment:
       - DATABASE_URL=postgresql://openmemory:${POSTGRES_PASSWORD:-changeme}@postgres:5432/openmemory
       - QDRANT_HOST=qdrant
@@ -93,9 +95,9 @@ services:
         condition: service_started
     expose:
       - "8765"
-    volumes:
-      - ./config:/usr/src/openmemory/config:ro
-      - ./scripts:/usr/src/openmemory/scripts:ro
+    # config/ and scripts/ are baked into the image now (see api/Dockerfile).
+    # No volume mount needed — Coolify was remapping ./X paths in a way that
+    # broke this approach. Keeping them inside the image is also more portable.
     command: >
       sh -c "
         if [ \"$$SEED_ON_BOOT\" = \"true\" ]; then

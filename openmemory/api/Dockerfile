@@ -4,11 +4,19 @@ LABEL org.opencontainers.image.name="mem0/openmemory-mcp"
 
 WORKDIR /usr/src/openmemory
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Build context is openmemory/ (parent of api/), so paths are relative to that.
+COPY api/requirements.txt .
+RUN pip install -r requirements.txt && pip install pyyaml
 
-COPY config.json .
-COPY . .
+# Copy the API source (FastAPI app + mem0 wrappers).
+COPY api/config.json .
+COPY api/ .
+
+# Copy the multi-user config (users/apps/categories YAML) and the seed
+# script directly into the image so they exist regardless of how Coolify
+# resolves volume mounts.
+COPY config /usr/src/openmemory/config
+COPY scripts /usr/src/openmemory/scripts
 
 EXPOSE 8765
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8765"]
