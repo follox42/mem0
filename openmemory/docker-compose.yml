@@ -55,14 +55,27 @@ services:
       - "7474"
       - "7687"
     # Traefik labels — Coolify auto-detects only single-port services.
-    # Neo4j has 2 ports (7474 browser + 7687 bolt) so we route browser
-    # explicitly. Bolt stays internal (only the openmemory-mcp container
-    # talks to it via the docker network).
+    # Neo4j has 2 protocols:
+    #  - 7474 HTTP (Browser UI)  -> exposed via http on neo4j.nocode18.com
+    #  - 7687 Bolt (TCP, used by Browser to talk to DB)
+    #     The Browser needs to reach Bolt from the user's machine, so we
+    #     expose it via Traefik TCP routing on :443 with TLS termination
+    #     (Let's Encrypt cert), SNI = neo4j-bolt.nocode18.com.
+    #     Traefik decrypts TLS and forwards plain Bolt to the container,
+    #     so we don't need to enable Bolt TLS inside Neo4j itself.
+    #     Connect URL from the Browser: bolt+s://neo4j-bolt.nocode18.com:443
     labels:
       - "traefik.enable=true"
+      # Browser UI (HTTP)
       - "traefik.http.routers.openmemory-neo4j.rule=Host(`neo4j.nocode18.com`)"
       - "traefik.http.routers.openmemory-neo4j.entrypoints=http"
       - "traefik.http.services.openmemory-neo4j.loadbalancer.server.port=7474"
+      # Bolt protocol (TCP over TLS on :443, SNI-routed)
+      - "traefik.tcp.routers.openmemory-neo4j-bolt.rule=HostSNI(`neo4j-bolt.nocode18.com`)"
+      - "traefik.tcp.routers.openmemory-neo4j-bolt.entrypoints=https"
+      - "traefik.tcp.routers.openmemory-neo4j-bolt.tls=true"
+      - "traefik.tcp.routers.openmemory-neo4j-bolt.tls.certresolver=letsencrypt"
+      - "traefik.tcp.services.openmemory-neo4j-bolt.loadbalancer.server.port=7687"
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
