@@ -162,7 +162,7 @@ async def list_memories(
     query = query.options(
         joinedload(Memory.app),
         joinedload(Memory.categories)
-    ).distinct(Memory.id)
+    ).distinct()
 
     # Get paginated results with transformer
     return sqlalchemy_paginate(
@@ -614,7 +614,7 @@ async def filter_memories(
     # Add eager loading for categories and make the query distinct
     query = query.options(
         joinedload(Memory.categories)
-    ).distinct(Memory.id)
+    ).distinct()
 
     # Use fastapi-pagination's paginate function
     return sqlalchemy_paginate(
@@ -658,7 +658,7 @@ async def get_related_memories(
         return Page.create([], total=0, params=params)
     
     # Build query for related memories
-    query = db.query(Memory).distinct(Memory.id).filter(
+    query = db.query(Memory).distinct().filter(
         Memory.user_id == user.id,
         Memory.id != memory_id,
         Memory.state != MemoryState.deleted
