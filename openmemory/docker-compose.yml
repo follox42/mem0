@@ -54,6 +54,15 @@ services:
     expose:
       - "7474"
       - "7687"
+    # Traefik labels — Coolify auto-detects only single-port services.
+    # Neo4j has 2 ports (7474 browser + 7687 bolt) so we route browser
+    # explicitly. Bolt stays internal (only the openmemory-mcp container
+    # talks to it via the docker network).
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.openmemory-neo4j.rule=Host(`neo4j.nocode18.com`)"
+      - "traefik.http.routers.openmemory-neo4j.entrypoints=http"
+      - "traefik.http.services.openmemory-neo4j.loadbalancer.server.port=7474"
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
