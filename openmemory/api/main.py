@@ -10,8 +10,15 @@ from app.routers import (apps_router, backup_router, config_router,
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_pagination import add_pagination
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 app = FastAPI(title="OpenMemory API")
+
+# Trust X-Forwarded-Proto from Traefik (Coolify reverse proxy) so that
+# redirect_slashes 307 responses use https:// in the Location header instead
+# of the internal http:// scheme uvicorn sees. Without this, the browser
+# refuses to follow the redirect (Mixed Content) and the UI breaks.
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 app.add_middleware(
     CORSMiddleware,
