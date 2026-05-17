@@ -67,7 +67,9 @@ services:
     restart: unless-stopped
 
   openmemory-mcp:
-    image: mem0/openmemory-mcp
+    # No `image:` here: that would make Compose pull the upstream
+    # mem0/openmemory-mcp image (which lacks our config/scripts) and
+    # ignore the local Dockerfile. We want the local build to win.
     build:
       context: .
       dockerfile: api/Dockerfile
