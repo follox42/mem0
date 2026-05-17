@@ -32,11 +32,8 @@ services:
       - "6333"
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:6333/healthz || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+    # Qdrant image is distroless (no shell, no wget, no curl).
+    # Skip healthcheck and rely on restart policy + dependent service retry.
     restart: unless-stopped
 
   neo4j:
@@ -54,10 +51,12 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      # cypher-shell ships with the official neo4j image, unlike wget.
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_PASSWORD:-changeme}\" 'RETURN 1' || exit 1"]
       interval: 15s
       timeout: 10s
-      retries: 10
+      retries: 15
+      start_period: 60s
     restart: unless-stopped
 
   openmemory-mcp:
@@ -79,10 +78,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      qdrant:
-        condition: service_healthy
       neo4j:
         condition: service_healthy
+      qdrant:
+        # Qdrant has no shell-based healthcheck possible (distroless image).
+        # Service starts fast; mem0 client will retry on connection error.
+        condition: service_started
     expose:
       - "8765"
     volumes:
