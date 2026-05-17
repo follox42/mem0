@@ -588,6 +588,73 @@ async def tag_memory(memory_id: str, tags: list[str]) -> str:
         db.close()
 
 
+# === MEM-7 Identity detection tools =================================================
+
+from app.services.identity_detector import (
+    ACCEPT_THRESHOLD as IDENT_ACCEPT,
+    COLD_MENU_THRESHOLD as IDENT_MENU,
+    identify as identify_service,
+    confirm as confirm_service,
+)
+
+
+@mcp.tool(description="Identify which household person is talking (Nolann / Jess / Yoann / Matt / Djamila). Call this FIRST at the start of every session, BEFORE any sensitive memory operation. Returns ranked predictions with confidence scores in [0, 1]. Based on top_confidence: >=0.85 -> accept silently and proceed; 0.50-0.85 -> confirm with the user ('is this {top_guess}?'); <0.50 -> ask explicit menu of 5 choices via AskUserQuestion (Claude Code) or interactive tool (Claude.com).")
+async def identify_person(message_text: str) -> str:
+    if not message_text or not message_text.strip():
+        return json.dumps({"error": "message_text required"})
+
+    try:
+        preds = identify_service(message_text)
+        if not preds:
+            return json.dumps({"error": "no candidates (no users seeded)"})
+
+        top = preds[0]
+        if top.confidence >= IDENT_ACCEPT:
+            suggestion = "accept"
+        elif top.confidence >= IDENT_MENU:
+            suggestion = "confirm"
+        else:
+            suggestion = "ask_menu"
+
+        return json.dumps({
+            "predictions": [
+                {
+                    "user_id": p.user_id,
+                    "confidence": round(p.confidence, 4),
+                    "reasoning": p.reasoning,
+                }
+                for p in preds
+            ],
+            "top_user_id": top.user_id,
+            "top_confidence": round(top.confidence, 4),
+            "suggestion": suggestion,
+        }, indent=2)
+    except Exception as e:
+        logging.exception(f"identify_person failed: {e}")
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool(description="Confirm the identity of the person talking. Call this AFTER you have determined (silently or via user prompt) who is talking. Records the (message, user_id) pair to train the identity model. Pass confidence_at_capture (if you had a guess) to track model quality over time.")
+async def confirm_identity(user_id: str, message_text: str, confidence_at_capture: float = None) -> str:
+    if not user_id or not message_text:
+        return json.dumps({"error": "user_id and message_text required"})
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            return json.dumps({"error": f"user '{user_id}' not found in OpenMemory"})
+    finally:
+        db.close()
+
+    try:
+        confirm_service(user_id, message_text, confidence_at_capture)
+        return json.dumps({"status": "ok", "user_id": user_id})
+    except Exception as e:
+        logging.exception(f"confirm_identity failed: {e}")
+        return json.dumps({"error": str(e)})
+
+
 # === MCP transport handlers =========================================================
 
 @mcp_router.get("/{client_name}/sse/{user_id}")

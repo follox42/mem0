@@ -12,6 +12,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -241,3 +242,43 @@ def after_memory_update(mapper, connection, target):
     db = Session(bind=connection)
     categorize_memory(target, db)
     db.close()
+
+
+# === MEM-7 Identity detection ====================================================
+# Tables for tracking which person (user_id) is talking to an agent,
+# based on style signature + confirmed message samples.
+# See openmemory/IDENTITY.md and projects/openmemory-stack/identity-detection-design-and-code
+
+class IdentityProfile(Base):
+    """One profile per user_id. Aggregates style signature + mean embedding."""
+    __tablename__ = "identity_profiles"
+    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False, unique=True, index=True)
+    sample_count = Column(Integer, default=0, nullable=False)
+    # embedding_mean = running average of all confirmed message embeddings
+    # (list of 1536 floats stored as JSON for portability across DBs)
+    embedding_mean = Column(JSON, nullable=True)
+    # style_signature: {avg_sentence_len, anglicism_freq, typo_rate, ...}
+    style_signature = Column(JSON, default=dict, nullable=False)
+    # top_categories: ["nocode18", "openfang", ...]
+    top_categories = Column(JSON, default=list, nullable=False)
+    updated_at = Column(DateTime,
+                        default=get_current_utc_time,
+                        onupdate=get_current_utc_time)
+
+
+class IdentityMessage(Base):
+    """Confirmed (message, user) pair used to train the identity model."""
+    __tablename__ = "identity_messages"
+    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False, index=True)
+    message_text = Column(String, nullable=False)
+    embedding = Column(JSON, nullable=False)  # 1536 floats
+    confirmed = Column(Boolean, default=True, nullable=False, index=True)
+    confidence_at_capture = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=get_current_utc_time, index=True)
+
+    __table_args__ = (
+        Index('idx_identity_msg_user_created', 'user_id', 'created_at'),
+        Index('idx_identity_msg_user_confirmed', 'user_id', 'confirmed'),
+    )
