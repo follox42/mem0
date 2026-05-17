@@ -39,7 +39,13 @@ services:
   neo4j:
     image: neo4j:5.24-community
     environment:
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-changeme}
+      # Coolify does NOT substitute nested ${VAR} inside composite strings
+      # (e.g. 'neo4j/${NEO4J_PASSWORD}') — see deployment failure logs.
+      # Workaround: pass the full auth string via NEO4J_AUTH env var directly.
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/changeme}
+      # Also expose NEO4J_PASSWORD inside the container so the healthcheck
+      # (cypher-shell -p $NEO4J_PASSWORD) can authenticate.
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-changeme}
       NEO4J_PLUGINS: '["apoc"]'
       NEO4J_dbms_security_procedures_unrestricted: apoc.*
       NEO4J_server_memory_heap_initial__size: 512m
