@@ -206,31 +206,37 @@ async def search_memory(query: str) -> str:
                 "user_id": uid
             }
 
-            embeddings = memory_client.embedding_model.embed(query, "search")
-
-            hits = memory_client.vector_store.search(
+            # Use the high-level Memory.search() so we benefit from the full
+            # mem0 v2 pipeline: embedding -> Qdrant + BM25 hybrid -> reranker
+            # (if configured) -> final scoring. The previous direct call to
+            # vector_store.search() skipped reranking entirely.
+            search_result = memory_client.search(
                 query=query,
-                vectors=embeddings,
                 top_k=10,
                 filters=filters,
+                rerank=True,
             )
+            hits = search_result.get("results", []) if isinstance(search_result, dict) else search_result
 
             allowed = set(str(mid) for mid in accessible_memory_ids) if accessible_memory_ids else None
 
             results = []
             for h in hits:
-                # All vector db search functions return OutputData class
-                id, score, payload = h.id, h.score, h.payload
-                if allowed and (h.id is None or h.id not in allowed):
+                # Memory.search returns dicts (not OutputData like vector_store.search)
+                hid = h.get("id") if isinstance(h, dict) else getattr(h, "id", None)
+                score = h.get("score") if isinstance(h, dict) else getattr(h, "score", None)
+                memory_text = h.get("memory") if isinstance(h, dict) else None
+                if allowed and (hid is None or hid not in allowed):
                     continue
-                
+
                 results.append({
-                    "id": id, 
-                    "memory": payload.get("data"), 
-                    "hash": payload.get("hash"),
-                    "created_at": payload.get("created_at"), 
-                    "updated_at": payload.get("updated_at"), 
+                    "id": hid,
+                    "memory": memory_text,
+                    "hash": h.get("hash") if isinstance(h, dict) else None,
+                    "created_at": h.get("created_at") if isinstance(h, dict) else None,
+                    "updated_at": h.get("updated_at") if isinstance(h, dict) else None,
                     "score": score,
+                    "rerank_score": h.get("rerank_score") if isinstance(h, dict) else None,
                 })
 
             for r in results: 
