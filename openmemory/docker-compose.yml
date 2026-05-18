@@ -36,57 +36,10 @@ services:
     # Skip healthcheck and rely on restart policy + dependent service retry.
     restart: unless-stopped
 
-  neo4j:
-    image: neo4j:5.24-community
-    environment:
-      # Coolify does NOT substitute nested ${VAR} inside composite strings
-      # (e.g. 'neo4j/${NEO4J_PASSWORD}') — see deployment failure logs.
-      # Workaround: pass the full auth string via NEO4J_AUTH env var directly.
-      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/changeme}
-      NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_dbms_security_procedures_unrestricted: apoc.*
-      NEO4J_server_memory_heap_initial__size: 512m
-      NEO4J_server_memory_heap_max__size: 1G
-      # The Neo4j entrypoint converts NEO4J_<x> env vars into config settings
-      # `<x>` and rejects unknown ones. So we MUST NOT use `NEO4J_PASSWORD`
-      # inside this container. Use a non-prefixed var for the healthcheck.
-      HC_NEO4J_PASSWORD: ${OPENMEMORY_NEO4J_PASSWORD:-changeme}
-    expose:
-      - "7474"
-      - "7687"
-    # Traefik labels — Coolify auto-detects only single-port services.
-    # Neo4j has 2 protocols:
-    #  - 7474 HTTP (Browser UI)  -> exposed via http on neo4j.nocode18.com
-    #  - 7687 Bolt (TCP, used by Browser to talk to DB)
-    #     The Browser needs to reach Bolt from the user's machine, so we
-    #     expose it via Traefik TCP routing on :443 with TLS termination
-    #     (Let's Encrypt cert), SNI = neo4j-bolt.nocode18.com.
-    #     Traefik decrypts TLS and forwards plain Bolt to the container,
-    #     so we don't need to enable Bolt TLS inside Neo4j itself.
-    #     Connect URL from the Browser: bolt+s://neo4j-bolt.nocode18.com:443
-    labels:
-      - "traefik.enable=true"
-      # Browser UI (HTTP)
-      - "traefik.http.routers.openmemory-neo4j.rule=Host(`neo4j.nocode18.com`)"
-      - "traefik.http.routers.openmemory-neo4j.entrypoints=http"
-      - "traefik.http.services.openmemory-neo4j.loadbalancer.server.port=7474"
-      # Bolt protocol (TCP over TLS on :443, SNI-routed)
-      - "traefik.tcp.routers.openmemory-neo4j-bolt.rule=HostSNI(`neo4j-bolt.nocode18.com`)"
-      - "traefik.tcp.routers.openmemory-neo4j-bolt.entrypoints=https"
-      - "traefik.tcp.routers.openmemory-neo4j-bolt.tls=true"
-      - "traefik.tcp.routers.openmemory-neo4j-bolt.tls.certresolver=letsencrypt"
-      - "traefik.tcp.services.openmemory-neo4j-bolt.loadbalancer.server.port=7687"
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-    healthcheck:
-      # cypher-shell ships with the official neo4j image, unlike wget.
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${HC_NEO4J_PASSWORD:-changeme}\" 'RETURN 1' || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 15
-      start_period: 60s
-    restart: unless-stopped
+  # Neo4j was removed 2026-05-17 — mem0 v2.x dropped graph_store support,
+  # so the container was idle. Retrieval relies entirely on Qdrant + BM25
+  # hybrid search + (optional) reranker. If you need a graph layer back,
+  # see GraphMemory plugins outside the mem0 main lib.
 
   openmemory-mcp:
     # No `image:` here: that would make Compose pull the upstream
@@ -99,9 +52,6 @@ services:
       - DATABASE_URL=postgresql://openmemory:${POSTGRES_PASSWORD:-changeme}@postgres:5432/openmemory
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      - NEO4J_URL=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=${OPENMEMORY_NEO4J_PASSWORD:-changeme}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - SEED_ON_BOOT=${SEED_ON_BOOT:-true}
       - USER=${USER:-}
@@ -110,8 +60,6 @@ services:
       - api/.env
     depends_on:
       postgres:
-        condition: service_healthy
-      neo4j:
         condition: service_healthy
       qdrant:
         # Qdrant has no shell-based healthcheck possible (distroless image).
@@ -150,5 +98,6 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
-  neo4j_data:
-  neo4j_logs:
+  # neo4j_data, neo4j_logs removed with the neo4j service (2026-05-17).
+  # Coolify keeps the underlying named volumes around — drop them manually
+  # via "docker volume rm" if you want to reclaim the disk.

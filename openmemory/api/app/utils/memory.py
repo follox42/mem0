@@ -26,10 +26,14 @@ Example configuration that will be automatically adjusted:
     }
 }
 
-Graph store (Neo4j):
-If NEO4J_URL is set in the environment, mem0 graph_store is auto-enabled.
-This activates entity + relation extraction alongside the vector store.
-Inspect via Neo4j Browser on :7474.
+Reranker (mem0 v2):
+By default a local SentenceTransformer cross-encoder reranks search results
+(see _create_default_config). Disable with RERANKER_ENABLED=false. Override
+the model with RERANKER_MODEL.
+
+Graph store: removed (mem0 v2.x dropped the graph_store hook). The
+_create_graph_store_config function is kept as dead code in case a future
+mem0 release re-exposes graph integration via its old config schema.
 """
 
 import hashlib
@@ -418,11 +422,21 @@ def get_default_memory_config():
         "version": "v1.1"
     }
 
-    # Conditionally enable graph_store (Neo4j) if env vars are present
-    graph_store = _create_graph_store_config()
-    if graph_store:
-        config["graph_store"] = graph_store
-        print(f"Graph store enabled: provider={graph_store['provider']}, url={graph_store['config']['url']}")
+    # Conditionally enable a reranker (mem0 v2 feature) for higher retrieval
+    # precision. SentenceTransformerReranker runs a local cross-encoder so it's
+    # free and offline; the default model is fast (~50ms on CPU per batch).
+    # Disable by setting RERANKER_ENABLED=false.
+    if os.environ.get("RERANKER_ENABLED", "true").lower() != "false":
+        config["reranker"] = {
+            "provider": "sentence_transformer",
+            "config": {
+                "model": os.environ.get(
+                    "RERANKER_MODEL",
+                    "cross-encoder/ms-marco-MiniLM-L-6-v2",
+                ),
+            },
+        }
+        print("Reranker enabled: sentence_transformer")
 
     return config
 
