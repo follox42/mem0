@@ -89,7 +89,7 @@ def parse_app_prefix(text: str, default_app: str) -> tuple[str, str]:
 
 
 @mcp.tool(description="Add a new memory. This method is called everytime the user informs anything about themselves, their preferences, or anything that has any relevant information which can be useful in the future conversation. This can also be called when the user asks you to remember something. Set infer to False to store the memory verbatim without LLM fact extraction. You can prefix the text with [app_name] to route the memory to a specific zone (e.g. '[shared] my Twitter is @follox42'). Without prefix, the memory is stored in the agent's default app.")
-async def add_memories(text: str, infer: bool = True) -> str:
+async def add_memory(text: str, infer: bool = True) -> str:
     uid = user_id_var.get(None)
     client_name = client_name_var.get(None)
 
@@ -179,7 +179,7 @@ async def add_memories(text: str, infer: bool = True) -> str:
 
 
 @mcp.tool(description="Search through stored memories. This method is called EVERYTIME the user asks anything.")
-async def search_memory(query: str) -> str:
+async def search_memories(query: str) -> str:
     uid = user_id_var.get(None)
     client_name = client_name_var.get(None)
     if not uid:
@@ -263,7 +263,7 @@ async def search_memory(query: str) -> str:
 
 
 @mcp.tool(description="List all memories in the user's memory")
-async def list_memories() -> str:
+async def get_memories() -> str:
     uid = user_id_var.get(None)
     client_name = client_name_var.get(None)
     if not uid:
@@ -331,8 +331,9 @@ async def list_memories() -> str:
         return f"Error getting memories: {e}"
 
 
-@mcp.tool(description="Delete specific memories by their IDs")
-async def delete_memories(memory_ids: list[str]) -> str:
+@mcp.tool(description="Delete a single memory by its ID. To delete multiple, call this once per ID.")
+async def delete_memory(memory_id: str) -> str:
+    memory_ids = [memory_id]
     uid = user_id_var.get(None)
     client_name = client_name_var.get(None)
     if not uid:
@@ -403,6 +404,116 @@ async def delete_memories(memory_ids: list[str]) -> str:
     except Exception as e:
         logging.exception(f"Error deleting memories: {e}")
         return f"Error deleting memories: {e}"
+
+
+@mcp.tool(description="Get a single memory by its ID. Returns the memory content, app, categories, and metadata.")
+async def get_memory(memory_id: str) -> str:
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    try:
+        db = SessionLocal()
+        try:
+            user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            try:
+                mid = uuid.UUID(memory_id)
+            except ValueError:
+                return f"Error: invalid memory_id '{memory_id}' (expected UUID)"
+
+            memory = db.query(Memory).filter(
+                Memory.id == mid,
+                Memory.user_id == user.id,
+            ).first()
+            if not memory:
+                return f"Error: memory '{memory_id}' not found"
+            if not check_memory_access_permissions(db, memory, app.id):
+                return f"Error: memory '{memory_id}' not accessible to this app"
+
+            payload = {
+                "id": str(memory.id),
+                "memory": memory.content,
+                "state": memory.state.value if hasattr(memory.state, "value") else str(memory.state),
+                "app_id": str(memory.app_id) if memory.app_id else None,
+                "categories": [c.name for c in (memory.categories or [])],
+                "metadata": memory.metadata_ or {},
+                "created_at": memory.created_at.isoformat() if memory.created_at else None,
+                "updated_at": memory.updated_at.isoformat() if memory.updated_at else None,
+            }
+            # Access log
+            access_log = MemoryAccessLog(
+                memory_id=mid,
+                app_id=app.id,
+                access_type="get",
+                metadata_={"source": "mcp"},
+            )
+            db.add(access_log)
+            db.commit()
+            return json.dumps(payload, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(f"Error getting memory: {e}")
+        return f"Error getting memory: {e}"
+
+
+@mcp.tool(description="Update a memory's content. The vector embedding is re-computed and the change is logged in history.")
+async def update_memory(memory_id: str, new_content: str) -> str:
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    memory_client = get_memory_client_safe()
+    if not memory_client:
+        return "Error: Memory system is currently unavailable. Please try again later."
+
+    try:
+        db = SessionLocal()
+        try:
+            user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            try:
+                mid = uuid.UUID(memory_id)
+            except ValueError:
+                return f"Error: invalid memory_id '{memory_id}' (expected UUID)"
+
+            memory = db.query(Memory).filter(
+                Memory.id == mid,
+                Memory.user_id == user.id,
+            ).first()
+            if not memory:
+                return f"Error: memory '{memory_id}' not found"
+            if not check_memory_access_permissions(db, memory, app.id):
+                return f"Error: memory '{memory_id}' not accessible to this app"
+
+            old_content = memory.content
+            memory.content = new_content
+            memory.updated_at = datetime.datetime.now(datetime.UTC)
+            # Re-embed in the vector store
+            try:
+                memory_client.update(str(mid), data=new_content)
+            except Exception as update_error:
+                logging.warning(f"Vector store update failed for {mid}: {update_error}")
+
+            access_log = MemoryAccessLog(
+                memory_id=mid,
+                app_id=app.id,
+                access_type="update",
+                metadata_={"old_content": old_content[:200], "new_content": new_content[:200]},
+            )
+            db.add(access_log)
+            db.commit()
+            return json.dumps({"id": str(mid), "memory": new_content, "event": "UPDATE"})
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(f"Error updating memory: {e}")
+        return f"Error updating memory: {e}"
 
 
 @mcp.tool(description="Delete all memories in the user's memory")
