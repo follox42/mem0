@@ -581,195 +581,20 @@ async def delete_all_memories() -> str:
         return f"Error deleting memories: {e}"
 
 
-# === MEM-4 routing tools ============================================================
-
-@mcp.tool(description="Move a memory to a different app (zone). Useful for re-categorizing memories. The target app is created on-the-fly if it doesn't exist. Cannot move across users.")
-async def move_memory(memory_id: str, target_app: str) -> str:
-    uid = user_id_var.get(None)
-    if not uid:
-        return "Error: user_id not provided"
-    if not target_app or not target_app.strip():
-        return "Error: target_app is required"
-
-    target_app = target_app.strip().lower()
-
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.user_id == uid).first()
-        if not user:
-            return f"Error: user '{uid}' not found"
-
-        try:
-            mem_uuid = uuid.UUID(memory_id)
-        except ValueError:
-            return f"Error: invalid memory_id '{memory_id}'"
-
-        memory = db.query(Memory).filter(Memory.id == mem_uuid).first()
-        if not memory:
-            return f"Error: memory '{memory_id}' not found"
-        if memory.user_id != user.id:
-            return f"Error: memory '{memory_id}' does not belong to user '{uid}' (cross-user move forbidden)"
-
-        # Get or create the target app
-        target_app_obj = db.query(App).filter(
-            App.owner_id == user.id, App.name == target_app
-        ).first()
-        if not target_app_obj:
-            target_app_obj = App(
-                id=uuid.uuid4(),
-                owner_id=user.id,
-                name=target_app,
-                is_active=True,
-                created_at=datetime.datetime.now(datetime.UTC),
-            )
-            db.add(target_app_obj)
-            db.flush()
-
-        old_app_id = memory.app_id
-        if old_app_id == target_app_obj.id:
-            return f"Memory already in app '{target_app}', no-op"
-
-        memory.app_id = target_app_obj.id
-
-        # Audit trail
-        access_log = MemoryAccessLog(
-            memory_id=mem_uuid,
-            app_id=target_app_obj.id,
-            access_type="move",
-            metadata_={
-                "from_app_id": str(old_app_id),
-                "to_app_name": target_app,
-                "actor": uid,
-            },
-        )
-        db.add(access_log)
-
-        db.commit()
-        return f"Memory '{memory_id}' moved to app '{target_app}' (user='{uid}')"
-    except Exception as e:
-        logging.exception(f"Error moving memory: {e}")
-        db.rollback()
-        return f"Error moving memory: {e}"
-    finally:
-        db.close()
-
-
-@mcp.tool(description="Promote a memory to the 'shared' app (shortcut for move_memory(id, 'shared')). Makes the memory readable by all agents of the user, assuming 'shared' has shared_default: true.")
-async def promote_memory(memory_id: str) -> str:
-    return await move_memory(memory_id, "shared")
-
-
-@mcp.tool(description="Add tags to a memory's metadata for cross-app filtering. Tags are merged (deduplicated, lowercased) with existing ones. Useful when a memory is relevant across multiple contexts (e.g. tags=['social', 'branding']).")
-async def tag_memory(memory_id: str, tags: list[str]) -> str:
-    uid = user_id_var.get(None)
-    if not uid:
-        return "Error: user_id not provided"
-    if not tags:
-        return "Error: tags list is empty"
-
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.user_id == uid).first()
-        if not user:
-            return f"Error: user '{uid}' not found"
-
-        try:
-            mem_uuid = uuid.UUID(memory_id)
-        except ValueError:
-            return f"Error: invalid memory_id '{memory_id}'"
-
-        memory = db.query(Memory).filter(Memory.id == mem_uuid).first()
-        if not memory:
-            return f"Error: memory '{memory_id}' not found"
-        if memory.user_id != user.id:
-            return f"Error: memory '{memory_id}' does not belong to user '{uid}'"
-
-        # Merge tags into metadata (dedup + lowercase + strip)
-        existing_meta = dict(memory.metadata_) if memory.metadata_ else {}
-        existing_tags = set(existing_meta.get("tags", []) or [])
-        for t in tags:
-            if t and isinstance(t, str):
-                cleaned = t.lower().strip()
-                if cleaned:
-                    existing_tags.add(cleaned)
-        existing_meta["tags"] = sorted(existing_tags)
-        memory.metadata_ = existing_meta
-
-        db.commit()
-        return f"Memory '{memory_id}' now has tags: {existing_meta['tags']}"
-    except Exception as e:
-        logging.exception(f"Error tagging memory: {e}")
-        db.rollback()
-        return f"Error tagging memory: {e}"
-    finally:
-        db.close()
-
-
-# === MEM-7 Identity detection tools =================================================
-
-from app.services.identity_detector import (
-    ACCEPT_THRESHOLD as IDENT_ACCEPT,
-    COLD_MENU_THRESHOLD as IDENT_MENU,
-    identify as identify_service,
-    confirm as confirm_service,
-)
-
-
-@mcp.tool(description="Identify which household person is talking (Nolann / Jess / Yoann / Matt / Djamila). Call this FIRST at the start of every session, BEFORE any sensitive memory operation. Returns ranked predictions with confidence scores in [0, 1]. Based on top_confidence: >=0.85 -> accept silently and proceed; 0.50-0.85 -> confirm with the user ('is this {top_guess}?'); <0.50 -> ask explicit menu of 5 choices via AskUserQuestion (Claude Code) or interactive tool (Claude.com).")
-async def identify_person(message_text: str) -> str:
-    if not message_text or not message_text.strip():
-        return json.dumps({"error": "message_text required"})
-
-    try:
-        preds = identify_service(message_text)
-        if not preds:
-            return json.dumps({"error": "no candidates (no users seeded)"})
-
-        top = preds[0]
-        if top.confidence >= IDENT_ACCEPT:
-            suggestion = "accept"
-        elif top.confidence >= IDENT_MENU:
-            suggestion = "confirm"
-        else:
-            suggestion = "ask_menu"
-
-        return json.dumps({
-            "predictions": [
-                {
-                    "user_id": p.user_id,
-                    "confidence": round(p.confidence, 4),
-                    "reasoning": p.reasoning,
-                }
-                for p in preds
-            ],
-            "top_user_id": top.user_id,
-            "top_confidence": round(top.confidence, 4),
-            "suggestion": suggestion,
-        }, indent=2)
-    except Exception as e:
-        logging.exception(f"identify_person failed: {e}")
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool(description="Confirm the identity of the person talking. Call this AFTER you have determined (silently or via user prompt) who is talking. Records the (message, user_id) pair to train the identity model. Pass confidence_at_capture (if you had a guess) to track model quality over time.")
-async def confirm_identity(user_id: str, message_text: str, confidence_at_capture: float = None) -> str:
-    if not user_id or not message_text:
-        return json.dumps({"error": "user_id and message_text required"})
-
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.user_id == user_id).first()
-        if not user:
-            return json.dumps({"error": f"user '{user_id}' not found in OpenMemory"})
-    finally:
-        db.close()
-
-    try:
-        confirm_service(user_id, message_text, confidence_at_capture)
-        return json.dumps({"status": "ok", "user_id": user_id})
-    except Exception as e:
-        logging.exception(f"confirm_identity failed: {e}")
-        return json.dumps({"error": str(e)})
+# Dropped (2026-05-20) — keep the MCP surface aligned with the upstream
+# mem0-plugin spec so any official plugin (Claude Code, Cursor, Codex)
+# works against this backend without modification:
+#
+#   - move_memory(id, app)              [our MEM-4 multi-app routing]
+#   - promote_memory(id)                [our MEM-4]
+#   - tag_memory(id, tags)              [our MEM-4]
+#   - identify_person(message_text)     [our MEM-7 household identity]
+#   - confirm_identity(user_id, msg)    [our MEM-7]
+#
+# The implementations are preserved in git history (commit d20debd).
+# REST endpoints under /api/v1/identity/* still expose the identity
+# service for the (yet to be built) web UI; only the MCP surface is
+# trimmed.
 
 
 # === MCP transport handlers =========================================================
